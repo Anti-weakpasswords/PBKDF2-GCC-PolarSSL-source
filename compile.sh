@@ -1,0 +1,1 @@
+gcc -O3 pbkdf2_polarssl.c pkcs5_without_pbes2_or_cipherInclude.c polarssl-1.3.4/library/md5.c polarssl-1.3.4/library/sha1.c polarssl-1.3.4/library/sha256.c polarssl-1.3.4/library/sha512.c polarssl-1.3.4/library/ripemd160.c  polarssl-1.3.4/library/md.c polarssl-1.3.4/library/md_wrap.c polarssl-1.3.4/library/version.c -Ipolarssl-1.3.4/include -o pbkdf2
