@@ -38,6 +38,18 @@
   (byte & 0x02 ? 1 : 0), \
   (byte & 0x01 ? 1 : 0) 
 
+
+uint8_t constantTimeCompare(uint8_t a[], uint32_t aLen, uint8_t b[], uint32_t bLen)
+    {
+        // Not quite constant time unless aLen == bLen
+        uint8_t compare;
+        uint32_t i;
+        compare = aLen ^ bLen;
+        for (i = 0; i < aLen && i < bLen; i++)
+            compare |= (uint8_t)(a[i] ^ b[i]);
+        return compare == 0;
+    }
+
 int PBKDF2_HMAC_MD5_string(const char* pass, const unsigned char* salt, int32_t iterations, uint32_t outputBytes, char* hexResult)
 {
     md_context_t md5_ctx;
@@ -236,6 +248,18 @@ int PBKDF2_HMAC_SHA_512_string(const char* pass, const unsigned char* salt, int3
     return(0);
 }
 
+/*
+
+int PBKDF2_HMAC_SHA_512_NearlyReferenceOpt1_string(const char* pass, const unsigned char* salt, int32_t iterations, uint32_t outputBytes, char* hexResult)
+{
+//NearlyReferenceOpt1: The first PBKDF2 optimization is to unroll the HMAC, since we can precompute both inner and outer pads only once. 
+
+// we will be using the PolarSSL sha512 function void sha512( const unsigned char *input, size_t ilen, unsigned char output[64], int is384 );
+
+
+
+}
+*/
 
 
 
@@ -244,14 +268,28 @@ int main(int argc, char **argv)
   char *pass = NULL;
   char *salt = NULL;
   char *expected = NULL;
+  char *algoString = NULL;
   uint32_t iterations = 0;
   uint32_t outputBytes = 0;
   uint16_t algo = 0;
   int c;
   uint8_t verbose = 0;
   uint8_t help = 0;
+  uint8_t interactive = 0;
   char version[64];
   
+  // Interactive mode vars below
+  size_t maxLen = 65535;
+  char *inPass;
+  char *inSalt;
+  char *inIterations;
+  char *inOutputBytes;
+  char *inAlgoString;
+  inPass = (char *) calloc (maxLen + 1,1);
+  inSalt = (char *) calloc (maxLen + 1,1);
+  inIterations = (char *) calloc (maxLen + 1,1);
+  inOutputBytes = (char *) calloc (maxLen + 1,1);
+  inAlgoString = (char *) calloc (maxLen + 1,1);
 
 
   opterr = 0;
@@ -260,35 +298,7 @@ int main(int argc, char **argv)
     switch (c)
       {
       case 'a':
-        if (strcmp(optarg,"SHA-512")==0)
-          {
-            algo = SHA_512_polarssl;
-          }
-        else if (strcmp(optarg,"SHA-384")==0)
-          {
-            algo = SHA_384_polarssl;
-          }
-        else if (strcmp(optarg,"SHA-256")==0)
-          {
-            algo = SHA_256_polarssl;
-          }
-        else if (strcmp(optarg,"SHA-224")==0)
-          {
-            algo = SHA_224_polarssl;
-          }
-        else if (strcmp(optarg,"SHA-1")==0)
-          {
-            algo = SHA_1_polarssl;
-          }
-        else if (strcmp(optarg,"MD5")==0)
-          {
-            algo = MD5_polarssl;
-          }
-        else
-          {
-            printf("ERROR: -a argument %s unknown.\n",optarg);
-            return 4;
-          }
+        algoString = optarg;
         break;
       case 'p':
         pass = optarg;
@@ -311,6 +321,9 @@ int main(int argc, char **argv)
       case 'e':
         expected = optarg;
         break;
+      case 'n':
+        interactive = 1;
+        break;
       case '?':
         puts("Case ?");fflush;
        if (optopt == 'c')
@@ -329,7 +342,10 @@ int main(int argc, char **argv)
       
   if (help)
     {
-    printf("Compiled with the source code of PolarSSL, version: %s\n",POLARSSL_VERSION_STRING_FULL);
+    printf("Compiled with the source code of PolarSSL, version: %s",POLARSSL_VERSION_STRING_FULL);
+    #ifdef POLARSSL_SHA512_ALT
+      puts(" POLARSSL_SHA512_ALT 1");
+    #endif
     version_get_string_full(version);
     printf(" Running with the source code of PolarSSL, version: %s\n",version);
     printf("Example: %s -a SHA-512 -p password -s salt -i 131072 -o 64\n",argv[0]);
@@ -345,9 +361,71 @@ int main(int argc, char **argv)
     puts("  -o bytes           Number of bytes of output; for password hashing, keep less than or equal to native hash size (MD5 <=16, SHA-1 <=20, SHA-256 <=32, SHA-512 <=64)");
     puts("  -O outputfmt       Output format NOT YET IMPLEMENTED - always HEX (lowercase)");
     puts("  -e hash            Expected hash (in the same format as outputfmt) results in output of 0 <actual> <expected> = different, 1 = same NOT YET IMPLEMENTED");
-    puts("  -n                 Interactive mode - DOES NOT NEED other command line arguments; NOT YET IMPLEMENTED");
+    puts("  -n                 Interactive mode - DOES NOT NEED other command line arguments");
     }
      
+
+  if (interactive)
+    {
+    int lenRead;
+    puts("Enter pass: ");
+    lenRead = getline (&inPass, &maxLen, stdin);
+    inPass[lenRead-1] = 0;
+    puts("Enter salt: ");
+    lenRead = getline (&inSalt, &maxLen, stdin);
+    inSalt[lenRead-1] = 0;
+    puts("Enter iterations: ");
+    lenRead = getline (&inIterations, &maxLen, stdin);
+    puts("Enter outputBytes: ");
+    lenRead = getline (&inOutputBytes, &maxLen, stdin);
+    puts("Enter algorithm - valid values are one of SHA-512|SHA-384|SHA-256|SHA-224|SHA-1|MD5: ");
+    lenRead = getline (&inAlgoString, &maxLen, stdin);
+    inAlgoString[lenRead-1] = 0;
+    pass = inPass;    
+    salt = inSalt;
+    iterations = atoi(inIterations);
+    outputBytes = atoi(inOutputBytes);
+    algoString = inAlgoString;
+    
+    // Yes, for real we'd actually check lenRead to see if there were error conditions.
+    //  std::cout << "Enter expected result hash (lower case hex): ";
+    //  std::cin >> expected;
+    }
+
+  if (strcmp(algoString,"SHA-512")==0)
+    {
+      algo = SHA_512_polarssl;
+    }
+  else if (strcmp(algoString,"SHA-384")==0)
+    {
+      algo = SHA_384_polarssl;
+    }
+  else if (strcmp(algoString,"SHA-256")==0)
+    {
+      algo = SHA_256_polarssl;
+    }
+  else if (strcmp(algoString,"SHA-224")==0)
+    {
+      algo = SHA_224_polarssl;
+    }
+  else if (strcmp(algoString,"SHA-1")==0)
+    {
+      algo = SHA_1_polarssl;
+    }
+  else if (strcmp(algoString,"MD5")==0)
+    {
+      algo = MD5_polarssl;
+    }
+  else
+    {
+      printf("ERROR: -a argument '%s' unknown.\n",algoString);
+      return 4;
+    }
+
+
+
+
+
   if (verbose)
     {
     printf("Interpreted arguments: algo %i password %s salt %s iterations %i outputbytes %i\n\n",algo,pass,salt,iterations,outputBytes);
@@ -435,7 +513,7 @@ int main(int argc, char **argv)
   else 
     {
     // Did it match or not?
-    if (strcmp(expected,hexResult)==0)
+    if (constantTimeCompare(expected,strlen(expected),hexResult,strlen(hexResult)))
       {
       puts("1");
       }
